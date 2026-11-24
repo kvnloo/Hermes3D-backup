@@ -239,6 +239,12 @@ import {
   StreamCameraController,
 } from "@/features/retro-office/systems/cameraLighting";
 import {
+  readStreamOutput,
+  STREAM_OUTPUT_DISABLED,
+  type StreamOutputConfig,
+} from "@/features/retro-office/core/streamOutput";
+import { StreamFrameClock } from "@/features/retro-office/systems/streamFrameClock";
+import {
   SceneAtmosphere,
   ScenePostFx,
 } from "@/features/retro-office/systems/atmosphere";
@@ -3174,6 +3180,11 @@ export function RetroOffice3D({
     () => getGraphicsQualityConfig(graphicsQuality),
     [graphicsQuality],
   );
+  // `?stream=1`: camera-only output for OBS Browser Source (see STREAM-TO-OBS.md).
+  const [streamOutput, setStreamOutput] = useState<StreamOutputConfig>(STREAM_OUTPUT_DISABLED);
+  useEffect(() => {
+    setStreamOutput(readStreamOutput());
+  }, []);
   const setGraphicsQuality = useCallback((quality: GraphicsQuality) => {
     setGraphicsQualityState(quality);
     saveGraphicsQuality(quality);
@@ -5764,9 +5775,13 @@ export function RetroOffice3D({
       {/* 3D Canvas — fills everything. */}
       <div
         className="absolute inset-0"
-        style={{
-          cursor: spaceDown ? (spaceDragging ? "grabbing" : "grab") : undefined,
-        }}
+        data-stream-output={streamOutput.enabled ? "1" : undefined}
+        style={
+          streamOutput.enabled
+            ? // Camera-only output: cover every HUD/overlay with the canvas.
+              { position: "fixed", inset: 0, zIndex: 2147483647, background: "#000" }
+            : { cursor: spaceDown ? (spaceDragging ? "grabbing" : "grab") : undefined }
+        }
         onMouseDown={() => {
           if (spaceDown) setSpaceDragging(true);
         }}
@@ -5786,14 +5801,19 @@ export function RetroOffice3D({
           <SceneErrorBoundary>
           <Canvas
             key={canvasResetKey}
-            dpr={[0.85, graphicsQualityConfig.maxDpr]}
+            dpr={streamOutput.enabled ? streamOutput.dpr : [0.85, graphicsQualityConfig.maxDpr]}
+            frameloop={streamOutput.enabled ? "never" : "always"}
             camera={{
               position: CAM_POS,
               fov: SCENE_CAMERA_FOV,
               near: 0.3,
               far: 320,
             }}
-            shadows={{ type: THREE.PCFShadowMap }}
+            shadows={
+              streamOutput.enabled && !streamOutput.shadows
+                ? false
+                : { type: THREE.PCFShadowMap }
+            }
             gl={{
               antialias: true,
               powerPreference: "high-performance",
@@ -5808,7 +5828,11 @@ export function RetroOffice3D({
           >
             {/* Ensure camera looks at the active office target after mount. */}
             <CameraRig target={cameraTarget} />
-            <AdaptiveDprController maxDpr={graphicsQualityConfig.maxDpr} />
+            {streamOutput.enabled ? (
+              <StreamFrameClock fps={streamOutput.fps} dpr={streamOutput.dpr} />
+            ) : (
+              <AdaptiveDprController maxDpr={graphicsQualityConfig.maxDpr} />
+            )}
 
             {/* Orbit / pan / zoom controls — disabled while follow cam is active or while editing furniture. */}
             <OrbitControls
